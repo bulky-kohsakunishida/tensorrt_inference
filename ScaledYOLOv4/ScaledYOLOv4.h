@@ -20,6 +20,7 @@ public:
     ~ScaledYOLOv4();
     void LoadEngine();
     bool InferenceFolder(const std::string &folder_name);
+    bool InferenceFolder_jogai(const std::string &folder_name, std::string jogai);
 
 private:
     void EngineInference(const std::vector<std::string> &image_list, const int &outSize,void **buffers,

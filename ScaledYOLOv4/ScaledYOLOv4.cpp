@@ -1,6 +1,7 @@
 #include "ScaledYOLOv4.h"
 #include "yaml-cpp/yaml.h"
-#include "common.hpp"
+#include "../includes/common/common.hpp"
+
 
 ScaledYOLOv4::ScaledYOLOv4(const std::string &config_file) {
     YAML::Node root = YAML::LoadFile(config_file);
@@ -82,6 +83,61 @@ bool ScaledYOLOv4::InferenceFolder(const std::string &folder_name) {
     int outSize = bufferSize[1] / sizeof(float) / BATCH_SIZE;
 
     EngineInference(sample_images, outSize, buffers, bufferSize, stream);
+
+    // release the stream and the buffers
+    cudaStreamDestroy(stream);
+    cudaFree(buffers[0]);
+    cudaFree(buffers[1]);
+
+    // destroy the engine
+    context->destroy();
+    engine->destroy();
+}
+
+bool ScaledYOLOv4::InferenceFolder_jogai(const std::string &folder_name, std::string jogai) {
+    std::vector<std::string> images = readFolder(folder_name);
+
+
+    for(int i = 0; i < images.size(); i++) {
+	std::string rm_moji = "//";
+	auto pos = images[i].find(rm_moji);
+        auto len = rm_moji.length();
+        if(pos != std::string::npos){
+	     images[i].replace(pos, len, "/");
+	}
+	if(images[i] == jogai){
+	     images.erase(images.begin() + i);
+	}
+    }
+
+    //get context
+    assert(engine != nullptr);
+    context = engine->createExecutionContext();
+    assert(context != nullptr);
+
+    //get buffers
+    assert(engine->getNbBindings() == 2);
+    void *buffers[2];
+    std::vector<int64_t> bufferSize;
+    int nbBindings = engine->getNbBindings();
+    bufferSize.resize(nbBindings);
+
+    for (int i = 0; i < nbBindings; ++i) {
+        nvinfer1::Dims dims = engine->getBindingDimensions(i);
+        nvinfer1::DataType dtype = engine->getBindingDataType(i);
+        int64_t totalSize = volume(dims) * 1 * getElementSize(dtype);
+        bufferSize[i] = totalSize;
+        std::cout << "binding" << i << ": " << totalSize << std::endl;
+        cudaMalloc(&buffers[i], totalSize);
+    }
+
+    //get stream
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
+
+    int outSize = bufferSize[1] / sizeof(float) / BATCH_SIZE;
+
+    EngineInference(images, outSize, buffers, bufferSize, stream);
 
     // release the stream and the buffers
     cudaStreamDestroy(stream);
