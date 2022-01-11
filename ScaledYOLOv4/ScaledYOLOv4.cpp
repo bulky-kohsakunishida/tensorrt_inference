@@ -2,6 +2,8 @@
 #include "yaml-cpp/yaml.h"
 #include "../includes/common/common.hpp"
 
+#include <boost/python.hpp>
+using namespace boost::python;
 
 ScaledYOLOv4::ScaledYOLOv4(const std::string &config_file) {
     YAML::Node root = YAML::LoadFile(config_file);
@@ -149,6 +151,47 @@ bool ScaledYOLOv4::InferenceFolder_jogai(const std::string &folder_name, std::st
     engine->destroy();
 }
 
+bool ScaledYOLOv4::InferenceImage(const std::string &image_name) {
+
+    //get context
+    assert(engine != nullptr);
+    context = engine->createExecutionContext();
+    assert(context != nullptr);
+
+    //get buffers
+    assert(engine->getNbBindings() == 2);
+    void *buffers[2];
+    std::vector<int64_t> bufferSize;
+    int nbBindings = engine->getNbBindings();
+    bufferSize.resize(nbBindings);
+
+    for (int i = 0; i < nbBindings; ++i) {
+        nvinfer1::Dims dims = engine->getBindingDimensions(i);
+        nvinfer1::DataType dtype = engine->getBindingDataType(i);
+        int64_t totalSize = volume(dims) * 1 * getElementSize(dtype);
+        bufferSize[i] = totalSize;
+        std::cout << "binding" << i << ": " << totalSize << std::endl;
+        cudaMalloc(&buffers[i], totalSize);
+    }
+
+    //get stream
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
+
+    int outSize = bufferSize[1] / sizeof(float) / BATCH_SIZE;
+
+    EngineInference(image_name, outSize, buffers, bufferSize, stream);
+
+    // release the stream and the buffers
+    cudaStreamDestroy(stream);
+    cudaFree(buffers[0]);
+    cudaFree(buffers[1]);
+
+    // destroy the engine
+    context->destroy();
+    engine->destroy();
+}
+
 void ScaledYOLOv4::EngineInference(const std::vector<std::string> &image_list, const int &outSize, void **buffers,
                              const std::vector<int64_t> &bufferSize, cudaStream_t stream) {
     int index = 0;
@@ -230,6 +273,85 @@ void ScaledYOLOv4::EngineInference(const std::vector<std::string> &image_list, c
             vec_Mat = std::vector<cv::Mat>(BATCH_SIZE);
             delete[] out;
         }
+    }
+    std::cout << "Average processing time is " << total_time / image_list.size() << "ms" << std::endl;
+}
+
+void ScaledYOLOv4::EngineInference_image(const std::string &image_name, const int &outSize, void **buffers,
+                             const std::vector<int64_t> &bufferSize, cudaStream_t stream) {
+    int index = 0;
+    int batch_id = 0;
+    std::vector<cv::Mat> vec_Mat(BATCH_SIZE);
+    std::vector<std::string> vec_name(BATCH_SIZE);
+    float total_time = 0;
+
+    std::cout << "Processing: " << image_name << std::endl;
+    cv::Mat src_img = cv::imread(image_name);
+    if (src_img.data)
+    {
+//            cv::cvtColor(src_img, src_img, cv::COLOR_BGR2RGB);
+        vec_Mat[batch_id] = src_img.clone();
+        vec_name[batch_id] = image_name;
+        batch_id++;
+    }
+    if (batch_id == BATCH_SIZE or index == image_name.size())
+   {
+        auto t_start_pre = std::chrono::high_resolution_clock::now();
+        std::cout << "prepareImage" << std::endl;
+        std::vector<float>curInput = prepareImage(vec_Mat);
+        auto t_end_pre = std::chrono::high_resolution_clock::now();
+        float total_pre = std::chrono::duration<float, std::milli>(t_end_pre - t_start_pre).count();
+        std::cout << "prepare image take: " << total_pre << " ms." << std::endl;
+        total_time += total_pre;
+        batch_id = 0;
+        if (!curInput.data()) {
+            std::cout << "prepare images ERROR!" << std::endl;
+        }
+        // DMA the input to the GPU,  execute the batch asynchronously, and DMA it back:
+        std::cout << "host2device" << std::endl;
+        cudaMemcpyAsync(buffers[0], curInput.data(), bufferSize[0], cudaMemcpyHostToDevice, stream);
+
+        // do inference
+        std::cout << "execute" << std::endl;
+        auto t_start = std::chrono::high_resolution_clock::now();
+        context->execute(BATCH_SIZE, buffers);
+        auto t_end = std::chrono::high_resolution_clock::now();
+        float total_inf = std::chrono::duration<float, std::milli>(t_end - t_start).count();
+        std::cout << "Inference take: " << total_inf << " ms." << std::endl;
+        total_time += total_inf;
+        std::cout << "execute success" << std::endl;
+        std::cout << "device2host" << std::endl;
+        std::cout << "post process" << std::endl;
+        auto r_start = std::chrono::high_resolution_clock::now();
+        auto *out = new float[outSize * BATCH_SIZE];
+        cudaMemcpyAsync(out, buffers[1], bufferSize[1], cudaMemcpyDeviceToHost, stream);
+        cudaStreamSynchronize(stream);
+        auto boxes = postProcess(vec_Mat, out, outSize);
+        auto r_end = std::chrono::high_resolution_clock::now();
+        float total_res = std::chrono::duration<float, std::milli>(r_end - r_start).count();
+        std::cout << "Post process take: " << total_res << " ms." << std::endl;
+        total_time += total_res;
+        for (int i = 0; i < (int)vec_Mat.size(); i++)
+        {
+            auto org_img = vec_Mat[i];
+            auto rects = boxes[i];
+//            cv::cvtColor(org_img, org_img, cv::COLOR_BGR2RGB);
+        for(const auto &rect : rects)
+        {
+            char t[256];
+            sprintf(t, "%.2f", rect.prob);
+            std::string name = detect_labels[rect.classes] + "-" + t;
+            cv::putText(org_img, name, cv::Point(rect.x - rect.w / 2, rect.y - rect.h / 2 - 5), cv::FONT_HERSHEY_COMPLEX, 0.7, class_colors[rect.classes], 2);
+            cv::Rect rst(rect.x - rect.w / 2, rect.y - rect.h / 2, rect.w, rect.h);
+            cv::rectangle(org_img, rst, class_colors[rect.classes], 2, cv::LINE_8, 0);
+        }
+        int pos = vec_name[i].find_last_of(".");
+        std::string rst_name = vec_name[i].insert(pos, "_");
+        std::cout << rst_name << std::endl;
+        cv::imwrite(rst_name, org_img);
+        }
+        vec_Mat = std::vector<cv::Mat>(BATCH_SIZE);
+        delete[] out;
     }
     std::cout << "Average processing time is " << total_time / image_list.size() << "ms" << std::endl;
 }
@@ -360,3 +482,12 @@ float ScaledYOLOv4::IOUCalculate(const ScaledYOLOv4::DetectRes &det_a, const Sca
     else
         return inter_area / union_area - distance_d / distance_c;
 }
+
+BOOST_PYTHON_MODULE(ScaledYOLOv4){
+	class_<ScaledYOLOv4>("ScaledYOLOv4", init<std::string>())
+		.def("LoadEngine", &ScaledYOLOv4::LoadEngine)
+		.def("InferenceFolder", &ScaledYOLOv4::InferenceFolder)
+		.def("InferenceImage", &ScaledYOLOv4::InferenceImage)
+		.def("InferenceFolder_jogai", &ScaledYOLOv4::InferenceFolder_jogai);
+}
+	
