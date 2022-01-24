@@ -180,7 +180,7 @@ bool ScaledYOLOv4::InferenceImage(const std::string &image_name) {
 
     int outSize = bufferSize[1] / sizeof(float) / BATCH_SIZE;
 
-    EngineInference(image_name, outSize, buffers, bufferSize, stream);
+    EngineInference_image(image_name, outSize, buffers, bufferSize, stream);
 
     // release the stream and the buffers
     cudaStreamDestroy(stream);
@@ -353,7 +353,7 @@ void ScaledYOLOv4::EngineInference_image(const std::string &image_name, const in
         vec_Mat = std::vector<cv::Mat>(BATCH_SIZE);
         delete[] out;
     }
-    std::cout << "Average processing time is " << total_time / image_list.size() << "ms" << std::endl;
+    std::cout << "Average processing time is " << total_time / image_name.size() << "ms" << std::endl;
 }
 
 void ScaledYOLOv4::GenerateReferMatrix() {
