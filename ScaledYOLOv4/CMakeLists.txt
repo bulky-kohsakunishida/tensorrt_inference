@@ -28,12 +28,23 @@ find_package(OpenCV REQUIRED)
 message(STATUS "Find OpenCV include at ${OpenCV_INCLUDE_DIRS}")
 message(STATUS "Find OpenCV libraries: ${OpenCV_LIBRARIES}")
 
+# Boost
+set(Boost_USE_STATIC_LIBS OFF)
+set(Boost_USE_MULTITHREADED ON)
+set(Boost_USE_STATIC_RUNTIME OFF)
+find_package(Boost REQUIRED COMPONENTS python38)
+message("## Boost_INCLUDE_DIRS: ${Boost_INCLUDE_DIRS}")
+message("## Boost_LIBRARY_DIRS: ${Boost_LIBRARY_DIRS}")
+message("## Boost_LIBRARIES: ${Boost_LIBRARIES}")
+
+set(SYS_INCLUDE /usr/include /usr/include/c++/7)
 set(COMMON_INCLUDE ../includes/common)
 set(YAML_INCLUDE ../includes/yaml-cpp/include)
 set(YAML_LIB_DIR ../includes/yaml-cpp/libs)
 
-include_directories(${CUDA_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS} ${COMMON_INCLUDE} ${YAML_INCLUDE})
-link_directories(${YAML_LIB_DIR})
+include_directories(SYSTEM ${SYS_INCLUDE})
+include_directories(${CUDA_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS} ${Boost_INCLUDE_DIRS} ${COMMON_INCLUDE} ${YAML_INCLUDE})
+link_directories(${YAML_LIB_DIR} ${Boost_LIBRARY_DIRS})
 
 add_executable(ScaledYOLOv4_trt main.cpp ScaledYOLOv4.cpp)
-target_link_libraries(ScaledYOLOv4_trt ${OpenCV_LIBRARIES} ${CUDA_LIBRARIES} ${TENSORRT_LIBRARY} yaml-cpp)
+target_link_libraries(ScaledYOLOv4_trt ${OpenCV_LIBRARIES} ${CUDA_LIBRARIES} ${TENSORRT_LIBRARY} ${Boost_LIBRARIES} yaml-cpp python3.8)
