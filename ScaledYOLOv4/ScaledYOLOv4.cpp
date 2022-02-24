@@ -2,6 +2,7 @@
 #include "yaml-cpp/yaml.h"
 #include "../includes/common/common.hpp"
 
+
 #include <boost/python.hpp>
 using namespace boost::python;
 
@@ -40,7 +41,13 @@ ScaledYOLOv4::ScaledYOLOv4(const std::string &config_file) {
         class_color = cv::Scalar(rand() % 255, rand() % 255, rand() % 255);
 }
 
-ScaledYOLOv4::~ScaledYOLOv4() = default;
+//ScaledYOLOv4::~ScaledYOLOv4() = default;
+ScaledYOLOv4::~ScaledYOLOv4(){
+    if(engine != nullptr){
+        engine->destroy();
+        engine = nullptr;
+    }
+}
 
 void ScaledYOLOv4::LoadEngine() {
     // create and load engine
@@ -93,22 +100,25 @@ bool ScaledYOLOv4::InferenceFolder(const std::string &folder_name) {
 
     // destroy the engine
     context->destroy();
-    engine->destroy();
+    //engine->destroy();
 }
 
-bool ScaledYOLOv4::InferenceFolder_jogai(const std::string &folder_name, std::string jogai) {
+bool ScaledYOLOv4::InferenceFolder_jogai(const std::string &folder_name, boost::python::list& jogai) {
     std::vector<std::string> images = readFolder(folder_name);
-
+    
 
     for(int i = 0; i < images.size(); i++) {
 	std::string rm_moji = "//";
 	auto pos = images[i].find(rm_moji);
-        auto len = rm_moji.length();
+        auto leng = rm_moji.length();
         if(pos != std::string::npos){
-	     images[i].replace(pos, len, "/");
+	     images[i].replace(pos, leng, "/");
 	}
-	if(images[i] == jogai){
-	     images.erase(images.begin() + i);
+	
+	for(int j = 0; j < len(jogai); j++) {		
+		if(images[i] == jogai[j]){
+	     	    images.erase(images.begin() + i);
+		}
 	}
     }
 
@@ -148,10 +158,11 @@ bool ScaledYOLOv4::InferenceFolder_jogai(const std::string &folder_name, std::st
 
     // destroy the engine
     context->destroy();
-    engine->destroy();
+    //engine->destroy();
 }
 
 bool ScaledYOLOv4::InferenceImage(const std::string &image_name) {
+    //std::vector<std::string> images = image_name;
 
     //get context
     assert(engine != nullptr);
@@ -189,7 +200,7 @@ bool ScaledYOLOv4::InferenceImage(const std::string &image_name) {
 
     // destroy the engine
     context->destroy();
-    engine->destroy();
+    //engine->destroy();
 }
 
 void ScaledYOLOv4::EngineInference(const std::vector<std::string> &image_list, const int &outSize, void **buffers,
@@ -266,7 +277,7 @@ void ScaledYOLOv4::EngineInference(const std::vector<std::string> &image_list, c
                     cv::rectangle(org_img, rst, class_colors[rect.classes], 2, cv::LINE_8, 0);
                 }
                 int pos = vec_name[i].find_last_of(".");
-                std::string rst_name = vec_name[i].insert(pos, "_");
+                std::string rst_name = vec_name[i].insert(pos, "_prd");
                 std::cout << rst_name << std::endl;
                 cv::imwrite(rst_name, org_img);
             }
@@ -285,17 +296,18 @@ void ScaledYOLOv4::EngineInference_image(const std::string &image_name, const in
     std::vector<std::string> vec_name(BATCH_SIZE);
     float total_time = 0;
 
+    index++;
     std::cout << "Processing: " << image_name << std::endl;
     cv::Mat src_img = cv::imread(image_name);
     if (src_img.data)
     {
-//            cv::cvtColor(src_img, src_img, cv::COLOR_BGR2RGB);
+//        cv::cvtColor(src_img, src_img, cv::COLOR_BGR2RGB);
         vec_Mat[batch_id] = src_img.clone();
         vec_name[batch_id] = image_name;
         batch_id++;
     }
     if (batch_id == BATCH_SIZE or index == image_name.size())
-   {
+    {
         auto t_start_pre = std::chrono::high_resolution_clock::now();
         std::cout << "prepareImage" << std::endl;
         std::vector<float>curInput = prepareImage(vec_Mat);
@@ -306,6 +318,7 @@ void ScaledYOLOv4::EngineInference_image(const std::string &image_name, const in
         batch_id = 0;
         if (!curInput.data()) {
             std::cout << "prepare images ERROR!" << std::endl;
+//            continue;
         }
         // DMA the input to the GPU,  execute the batch asynchronously, and DMA it back:
         std::cout << "host2device" << std::endl;
@@ -334,21 +347,23 @@ void ScaledYOLOv4::EngineInference_image(const std::string &image_name, const in
         for (int i = 0; i < (int)vec_Mat.size(); i++)
         {
             auto org_img = vec_Mat[i];
+//            if (!org_img.data)
+//                continue;
             auto rects = boxes[i];
 //            cv::cvtColor(org_img, org_img, cv::COLOR_BGR2RGB);
-        for(const auto &rect : rects)
-        {
-            char t[256];
-            sprintf(t, "%.2f", rect.prob);
-            std::string name = detect_labels[rect.classes] + "-" + t;
-            cv::putText(org_img, name, cv::Point(rect.x - rect.w / 2, rect.y - rect.h / 2 - 5), cv::FONT_HERSHEY_COMPLEX, 0.7, class_colors[rect.classes], 2);
-            cv::Rect rst(rect.x - rect.w / 2, rect.y - rect.h / 2, rect.w, rect.h);
-            cv::rectangle(org_img, rst, class_colors[rect.classes], 2, cv::LINE_8, 0);
-        }
-        int pos = vec_name[i].find_last_of(".");
-        std::string rst_name = vec_name[i].insert(pos, "_");
-        std::cout << rst_name << std::endl;
-        cv::imwrite(rst_name, org_img);
+            for(const auto &rect : rects)
+            {
+                char t[256];
+                sprintf(t, "%.2f", rect.prob);
+                std::string name = detect_labels[rect.classes] + "-" + t;
+                cv::putText(org_img, name, cv::Point(rect.x - rect.w / 2, rect.y - rect.h / 2 - 5), cv::FONT_HERSHEY_COMPLEX, 0.7, class_colors[rect.classes], 2);
+                cv::Rect rst(rect.x - rect.w / 2, rect.y - rect.h / 2, rect.w, rect.h);
+                cv::rectangle(org_img, rst, class_colors[rect.classes], 2, cv::LINE_8, 0);
+            }
+            int pos = vec_name[i].find_last_of(".");
+            std::string rst_name = vec_name[i].insert(pos, "_prd");
+            std::cout << rst_name << std::endl;
+            cv::imwrite(rst_name, org_img);
         }
         vec_Mat = std::vector<cv::Mat>(BATCH_SIZE);
         delete[] out;
@@ -483,11 +498,10 @@ float ScaledYOLOv4::IOUCalculate(const ScaledYOLOv4::DetectRes &det_a, const Sca
         return inter_area / union_area - distance_d / distance_c;
 }
 
-BOOST_PYTHON_MODULE(ScaledYOLOv4){
-	class_<ScaledYOLOv4>("ScaledYOLOv4", init<std::string>())
-		.def("LoadEngine", &ScaledYOLOv4::LoadEngine)
-		.def("InferenceFolder", &ScaledYOLOv4::InferenceFolder)
-		.def("InferenceImage", &ScaledYOLOv4::InferenceImage)
-		.def("InferenceFolder_jogai", &ScaledYOLOv4::InferenceFolder_jogai);
+BOOST_PYTHON_MODULE(ScaledYOLOv4) {    
+    class_<ScaledYOLOv4>("ScaledYOLOv4", init<std::string>())
+    	.def("LoadEngine", &ScaledYOLOv4::LoadEngine)
+    	.def("InferenceFolder", &ScaledYOLOv4::InferenceFolder)
+	.def("InferenceImage", &ScaledYOLOv4::InferenceImage)
+	.def("InferenceFolder_jogai", &ScaledYOLOv4::InferenceFolder_jogai);
 }
-	
