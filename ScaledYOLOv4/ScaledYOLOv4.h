@@ -22,13 +22,13 @@ public:
     ~ScaledYOLOv4();
     void LoadEngine();
     bool InferenceFolder(const std::string &folder_name);
-    bool InferenceFolder_jogai(const std::string &folder_name, std::string jogai);
+    bool InferenceFolder_jogai(const std::string &folder_name, boost::python::list& jogai);
     bool InferenceImage(const std::string &image_name);
 
 private:
     void EngineInference(const std::vector<std::string> &image_list, const int &outSize,void **buffers,
                          const std::vector<int64_t> &bufferSize, cudaStream_t stream);
-    void EngineInference_image(const std::string &image_name, const int &outSize,void **buffers,
+    void EngineInference_image(const std::string &image, const int &outSize,void **buffers,
                          const std::vector<int64_t> &bufferSize, cudaStream_t stream);
     void GenerateReferMatrix();
     std::vector<float> prepareImage(std::vector<cv::Mat> & vec_img);
